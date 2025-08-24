@@ -70,7 +70,7 @@ async function getRepositoryCode(owner, repo) {
 
     // Function to process files recursively
     async function processDirectory(contents, currentPath = '') {
-      for (const item of contents.slice(0, 20)) { // Limit to avoid rate limits
+      for (const item of contents.slice(0, 50)) { // Increased from 20 to 50
         if (item.type === 'file') {
           const fileName = item.name.toLowerCase();
           const filePath = currentPath ? `${currentPath}/${item.name}` : item.name;
@@ -88,13 +88,13 @@ async function getRepositoryCode(owner, repo) {
           }
           
           // Get source code files
-          if (codeExtensions.some(ext => fileName.endsWith(ext)) && item.size < 50000) {
+          if (codeExtensions.some(ext => fileName.endsWith(ext)) && item.size < 200000) { // Increased from 50KB to 200KB
             const content = await getFileContent(owner, repo, filePath);
             if (content) {
               codeFiles.push({
                 path: filePath,
                 name: item.name,
-                content: content.substring(0, 8000), // Limit for analysis
+                content: content.substring(0, 15000), // Increased from 8000 to 15000 chars
                 language: getLanguageFromExtension(fileName)
               });
             }
@@ -131,7 +131,7 @@ async function getRepositoryCode(owner, repo) {
         stars: repoInfo.stargazers_count,
         forks: repoInfo.forks_count
       },
-      codeFiles: codeFiles.slice(0, 10), // Top 10 most important files
+      codeFiles: codeFiles.slice(0, 20), // Increased from 10 to 20 most important files
       importantFiles
     };
 
@@ -158,17 +158,16 @@ async function analyzeCodeWithGemini(question, repoData) {
   }
 
   // Build a comprehensive code analysis prompt
-  let codeContext = `I'm analyzing the repository: ${repoData.repoInfo.name}
+  let codeContext = `Repository: ${repoData.repoInfo.name}
 ${repoData.repoInfo.description ? `Description: ${repoData.repoInfo.description}` : ''}
 Main Language: ${repoData.repoInfo.language}
 
-Here's the actual SOURCE CODE I found:
-
+SOURCE CODE:
 `;
 
   // Add code files content
   repoData.codeFiles.forEach((file, index) => {
-    codeContext += `=== FILE: ${file.path} (${file.language}) ===
+    codeContext += `=== ${file.path} ===
 ${file.content}
 
 `;
@@ -182,20 +181,13 @@ ${file.content.substring(0, 2000)}
 `;
   });
 
-  const prompt = `You're a senior developer analyzing this codebase. Answer the user's question by actually looking at the CODE, not just descriptions.
+  const prompt = `You're a senior developer having a casual conversation with a junior dev who just asked about this codebase. Respond naturally and conversationally, like you're sitting next to them explaining the code.
 
 ${codeContext}
 
-User Question: ${question}
+Junior dev asks: "${question}"
 
-Analyze the actual code above and provide insights about:
-- How the code works internally
-- Key functions and their purposes  
-- Architecture and design patterns
-- Dependencies and how they're used
-- Any interesting implementation details
-
-Answer naturally, like you just read through the code:`;
+Respond like you're having a normal conversation - be friendly, casual, and helpful. Don't write a formal analysis or use bullet points. Just talk naturally about the code like you would to a colleague.`;
 
   try {
     const response = await axios.post(
@@ -205,8 +197,8 @@ Answer naturally, like you just read through the code:`;
           parts: [{ text: prompt }]
         }],
         generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2000
+          temperature: 0.8,
+          maxOutputTokens: 2500 // Increased from 1500 to 2500 for more detailed responses
         }
       },
       {
