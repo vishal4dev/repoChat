@@ -9,7 +9,11 @@ import {
   User,
   Trash2,
   Settings,
-  CheckCircle
+  CheckCircle,
+  Search,
+  FileText,
+  Code,
+  X
 } from "lucide-react";
 
 export default function GitHubRepoChat() {
@@ -20,6 +24,11 @@ export default function GitHubRepoChat() {
   const [error, setError] = useState("");
   const [repoAnalyzed, setRepoAnalyzed] = useState(false);
   const [repoInfo, setRepoInfo] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -139,12 +148,69 @@ export default function GitHubRepoChat() {
     }
   };
 
+  const searchCode = async () => {
+    if (!searchQuery.trim()) return;
+
+    setIsSearching(true);
+    try {
+      const response = await fetch("/api/search", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          repoUrl: repoUrl.trim(),
+          query: searchQuery.trim(),
+          type: 'content'
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Search failed");
+      }
+
+      setSearchResults(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const viewFile = async (filePath) => {
+    try {
+      const response = await fetch("/api/file", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          repoUrl: repoUrl.trim(),
+          filePath
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load file");
+      }
+
+      setSelectedFile(data.file);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const clearChat = () => {
     setMessages([]);
     setCurrentMessage("");
     setRepoAnalyzed(false);
     setRepoInfo(null);
     setError("");
+    setShowSearch(false);
+    setSearchResults(null);
+    setSelectedFile(null);
   };
 
   const resetAll = () => {
@@ -232,6 +298,13 @@ export default function GitHubRepoChat() {
             </div>
             <div className="flex gap-2">
               <button
+                onClick={() => setShowSearch(!showSearch)}
+                className="p-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-all"
+                title="Search code"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+              <button
                 onClick={clearChat}
                 className="p-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-all"
                 title="Clear chat"
@@ -245,6 +318,115 @@ export default function GitHubRepoChat() {
               >
                 <Settings className="w-4 h-4" />
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Search Panel */}
+        {repoAnalyzed && showSearch && (
+          <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 mb-6 p-4">
+            <div className="flex items-center gap-3 mb-4">
+              <Search className="w-5 h-5 text-purple-400" />
+              <h3 className="text-white font-medium">Search Code</h3>
+            </div>
+            
+            <div className="flex gap-3 mb-4">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && searchCode()}
+                placeholder="Search functions, variables, classes..."
+                className="flex-1 px-4 py-2 bg-white/5 border border-white/20 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+              />
+              <button
+                onClick={searchCode}
+                disabled={isSearching || !searchQuery.trim()}
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-medium hover:from-purple-700 hover:to-blue-700 transition-all duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSearching ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Search className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+
+            {/* Search Results */}
+            {searchResults && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-300">
+                    Found {searchResults.totalMatches} matches in {searchResults.results.length} files
+                  </p>
+                </div>
+                
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {searchResults.results.map((result, index) => (
+                    <div key={index} className="bg-white/5 rounded-lg p-3 border border-white/10">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-white font-medium">{result.file.name}</span>
+                          <span className="text-xs text-gray-400">({result.file.language})</span>
+                        </div>
+                        <button
+                          onClick={() => viewFile(result.file.path)}
+                          className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1"
+                        >
+                          <Code className="w-3 h-3" />
+                          View
+                        </button>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        {result.matches.slice(0, 2).map((match, matchIndex) => (
+                          <div key={matchIndex} className="text-xs">
+                            <span className="text-gray-400">Line {match.lineNumber}:</span>
+                            <code className="ml-2 text-gray-200 bg-black/20 px-2 py-1 rounded">
+                              {match.line.substring(0, 80)}{match.line.length > 80 ? '...' : ''}
+                            </code>
+                          </div>
+                        ))}
+                        {result.totalMatches > 2 && (
+                          <p className="text-xs text-gray-400">
+                            +{result.totalMatches - 2} more matches
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* File Viewer Modal */}
+        {selectedFile && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 rounded-2xl border border-white/20 w-full max-w-4xl h-[80vh] flex flex-col">
+              <div className="flex items-center justify-between p-4 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <FileText className="w-5 h-5 text-purple-400" />
+                  <div>
+                    <h3 className="text-white font-medium">{selectedFile.name}</h3>
+                    <p className="text-sm text-gray-400">{selectedFile.path}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedFile(null)}
+                  className="p-2 hover:bg-white/10 rounded-lg transition-all"
+                >
+                  <X className="w-5 h-5 text-gray-400" />
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-auto p-4">
+                <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
+                  {selectedFile.content}
+                </pre>
+              </div>
             </div>
           </div>
         )}
