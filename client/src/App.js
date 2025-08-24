@@ -1,12 +1,18 @@
-import React, { useState } from 'react';
-import { Send, Github, MessageSquare, Loader2, ExternalLink } from 'lucide-react';
+import React, { useState } from "react";
+import {
+  Send,
+  Github,
+  MessageSquare,
+  Loader2,
+  ExternalLink,
+} from "lucide-react";
 
 export default function GitHubRepoChat() {
-  const [repoUrl, setRepoUrl] = useState('');
-  const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('');
+  const [repoUrl, setRepoUrl] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   const validateGitHubUrl = (url) => {
     const githubRegex = /^https:\/\/github\.com\/[^\/]+\/[^\/]+\/?$/;
@@ -16,57 +22,59 @@ export default function GitHubRepoChat() {
   const extractRepoInfo = (url) => {
     const match = url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
     if (match) {
-      return { owner: match[1], repo: match[2].replace(/\.git$/, '') };
+      return { owner: match[1], repo: match[2].replace(/\.git$/, "") };
     }
     return null;
   };
 
   const handleSubmit = async () => {
     if (!repoUrl.trim() || !question.trim()) {
-      setError('Please provide both a repository URL and a question');
+      setError("Please provide both a repository URL and a question");
       return;
     }
 
     if (!validateGitHubUrl(repoUrl)) {
-      setError('Please enter a valid GitHub repository URL');
+      setError("Please enter a valid GitHub repository URL");
       return;
     }
 
-    setError('');
+    setError("");
     setIsLoading(true);
-    setAnswer('');
+    setAnswer("");
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
+      const response = await fetch("/api/chat", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           repoUrl: repoUrl.trim(),
-          question: question.trim()
-        })
+          question: question.trim(),
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to get response');
+        throw new Error(data.error || "Failed to get response");
       }
 
       setAnswer(data.answer);
     } catch (err) {
-      setError(err.message || 'Failed to analyze the repository. Please try again.');
+      setError(
+        err.message || "Failed to analyze the repository. Please try again."
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
   const clearAll = () => {
-    setRepoUrl('');
-    setQuestion('');
-    setAnswer('');
-    setError('');
+    setRepoUrl("");
+    setQuestion("");
+    setAnswer("");
+    setError("");
   };
 
   return (
@@ -78,12 +86,11 @@ export default function GitHubRepoChat() {
             <div className="p-3 bg-white/10 rounded-full backdrop-blur-sm">
               <Github className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-4xl font-bold text-white">
-              RepoChat
-            </h1>
+            <h1 className="text-4xl font-bold text-white">RepoChat</h1>
           </div>
           <p className="text-gray-300 text-lg max-w-2xl mx-auto">
-            Chat with any GitHub repository in natural language. Just paste the repo URL and ask questions!
+            Chat with any GitHub repository in natural language. Just paste the
+            repo URL and ask questions!
           </p>
         </div>
 
@@ -92,7 +99,10 @@ export default function GitHubRepoChat() {
           <div className="space-y-6">
             {/* Repository URL Input */}
             <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
-              <label htmlFor="repo-url" className="block text-white font-medium mb-3 flex items-center gap-2">
+              <label
+                htmlFor="repo-url"
+                className="block text-white font-medium mb-3 flex items-center gap-2"
+              >
                 <Github className="w-5 h-5" />
                 GitHub Repository URL
               </label>
@@ -113,7 +123,10 @@ export default function GitHubRepoChat() {
 
             {/* Question Input */}
             <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
-              <label htmlFor="question" className="block text-white font-medium mb-3 flex items-center gap-2">
+              <label
+                htmlFor="question"
+                className="block text-white font-medium mb-3 flex items-center gap-2"
+              >
                 <MessageSquare className="w-5 h-5" />
                 Your Question
               </label>
@@ -121,6 +134,12 @@ export default function GitHubRepoChat() {
                 id="question"
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
                 placeholder="What does this repository do? How is the project structured? What are the main components?"
                 rows={4}
                 className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all resize-none"
@@ -154,7 +173,7 @@ export default function GitHubRepoChat() {
                   </>
                 )}
               </button>
-              
+
               <button
                 type="button"
                 onClick={clearAll}
