@@ -12,7 +12,11 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'build')));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_API_URL = 'https://api.github.com';
+
+// In-memory storage for analyzed repositories (in production, use Redis or database)
+const repoCache = new Map();
 
 function extractRepoInfo(url) {
   const match = url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
@@ -28,8 +32,13 @@ function extractRepoInfo(url) {
 // Function to get file content from GitHub
 async function getFileContent(owner, repo, filePath) {
   try {
-    const response = await axios.get(`${GITHUB_API_URL}/repos/${owner}/${repo}/contents/${filePath}`);
-    if (response.data.type === 'file' && response.data.size < 100000) { // Limit to 100KB files
+    const headers = {};
+    if (GITHUB_TOKEN) {
+      headers.Authorization = `token ${GITHUB_TOKEN}`;
+    }
+    
+    const response = await axios.get(`${GITHUB_API_URL}/repos/${owner}/${repo}/contents/${filePath}`, { headers });
+    if (response.data.type === 'file' && response.data.size < 200000) { // 200KB limit
       const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
       return content;
     }
@@ -43,7 +52,12 @@ async function getFileContent(owner, repo, filePath) {
 // Recursively get directory contents
 async function getDirectoryContents(owner, repo, dirPath = '') {
   try {
-    const response = await axios.get(`${GITHUB_API_URL}/repos/${owner}/${repo}/contents/${dirPath}`);
+    const headers = {};
+    if (GITHUB_TOKEN) {
+      headers.Authorization = `token ${GITHUB_TOKEN}`;
+    }
+    
+    const response = await axios.get(`${GITHUB_API_URL}/repos/${owner}/${repo}/contents/${dirPath}`, { headers });
     return response.data;
   } catch (error) {
     console.error(`Error fetching directory ${dirPath}:`, error.message);
@@ -51,60 +65,62 @@ async function getDirectoryContents(owner, repo, dirPath = '') {
   }
 }
 
-// Get important source files (not just file names, actual CODE!)
+// Get comprehensive repository analysis
 async function getRepositoryCode(owner, repo) {
   try {
     const repoResponse = await axios.get(`${GITHUB_API_URL}/repos/${owner}/${repo}`);
     const repoInfo = repoResponse.data;
 
-    // Get root directory contents
     const rootContents = await getDirectoryContents(owner, repo);
     
     const codeFiles = [];
     const importantFiles = [];
 
-    // Identify important files to analyze
-    const codeExtensions = ['.js', '.ts', '.tsx', '.jsx', '.py', '.java', '.cpp', '.c', '.go', '.rs', '.php', '.rb', '.swift', '.kt'];
-    const configFiles = ['package.json', 'requirements.txt', 'Cargo.toml', 'pom.xml', 'build.gradle', 'Dockerfile'];
-    const docFiles = ['README.md', 'CHANGELOG.md'];
+    const codeExtensions = ['.js', '.ts', '.tsx', '.jsx', '.py', '.java', '.cpp', '.c', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.vue', '.svelte'];
+    const configFiles = ['package.json', 'requirements.txt', 'Cargo.toml', 'pom.xml', 'build.gradle', 'Dockerfile', 'docker-compose.yml', '.env.example'];
+    const docFiles = ['README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'docs.md'];
 
-    // Function to process files recursively
-    async function processDirectory(contents, currentPath = '') {
-      for (const item of contents.slice(0, 50)) { // Increased from 20 to 50
+    async function processDirectory(contents, currentPath = '', depth = 0) {
+      if (depth > 3) return; // Limit recursion depth
+      
+      for (const item of contents.slice(0, 60)) {
         if (item.type === 'file') {
           const fileName = item.name.toLowerCase();
           const filePath = currentPath ? `${currentPath}/${item.name}` : item.name;
           
-          // Get important config and doc files
+          // Important config and doc files
           if (configFiles.includes(fileName) || docFiles.includes(fileName)) {
             const content = await getFileContent(owner, repo, filePath);
             if (content) {
               importantFiles.push({
                 path: filePath,
                 name: item.name,
-                content: content.substring(0, 5000) // Limit content size
+                content: content.substring(0, 8000),
+                type: 'config'
               });
             }
           }
           
-          // Get source code files
-          if (codeExtensions.some(ext => fileName.endsWith(ext)) && item.size < 200000) { // Increased from 50KB to 200KB
+          // Source code files
+          if (codeExtensions.some(ext => fileName.endsWith(ext)) && item.size < 300000) {
             const content = await getFileContent(owner, repo, filePath);
             if (content) {
               codeFiles.push({
                 path: filePath,
                 name: item.name,
-                content: content.substring(0, 15000), // Increased from 8000 to 15000 chars
-                language: getLanguageFromExtension(fileName)
+                content: content.substring(0, 20000),
+                language: getLanguageFromExtension(fileName),
+                size: item.size
               });
             }
           }
         } else if (item.type === 'dir' && !item.name.startsWith('.') && 
-                  !['node_modules', 'dist', 'build', 'target', '__pycache__'].includes(item.name)) {
-          // Recursively process important directories
-          if (['src', 'lib', 'app', 'components', 'utils', 'services', 'controllers', 'models'].includes(item.name.toLowerCase())) {
+                  !['node_modules', 'dist', 'build', 'target', '__pycache__', 'vendor', '.git'].includes(item.name)) {
+          
+          const importantDirs = ['src', 'lib', 'app', 'components', 'utils', 'services', 'controllers', 'models', 'routes', 'middleware', 'config'];
+          if (importantDirs.includes(item.name.toLowerCase()) || depth === 0) {
             const dirContents = await getDirectoryContents(owner, repo, `${currentPath ? currentPath + '/' : ''}${item.name}`);
-            await processDirectory(dirContents, `${currentPath ? currentPath + '/' : ''}${item.name}`);
+            await processDirectory(dirContents, `${currentPath ? currentPath + '/' : ''}${item.name}`, depth + 1);
           }
         }
       }
@@ -112,15 +128,15 @@ async function getRepositoryCode(owner, repo) {
 
     await processDirectory(rootContents);
 
-    // Prioritize main files
+    // Sort files by importance
     codeFiles.sort((a, b) => {
-      const priority = ['index', 'main', 'app', 'server'];
+      const priority = ['index', 'main', 'app', 'server', 'router'];
       const aPriority = priority.findIndex(p => a.name.toLowerCase().includes(p));
       const bPriority = priority.findIndex(p => b.name.toLowerCase().includes(p));
       if (aPriority !== -1 && bPriority !== -1) return aPriority - bPriority;
       if (aPriority !== -1) return -1;
       if (bPriority !== -1) return 1;
-      return 0;
+      return a.size - b.size; // Smaller files first for remaining
     });
 
     return {
@@ -129,14 +145,17 @@ async function getRepositoryCode(owner, repo) {
         description: repoInfo.description,
         language: repoInfo.language,
         stars: repoInfo.stargazers_count,
-        forks: repoInfo.forks_count
+        forks: repoInfo.forks_count,
+        topics: repoInfo.topics,
+        homepage: repoInfo.homepage
       },
-      codeFiles: codeFiles.slice(0, 20), // Increased from 10 to 20 most important files
-      importantFiles
+      codeFiles: codeFiles.slice(0, 25),
+      importantFiles,
+      totalFiles: codeFiles.length + importantFiles.length
     };
 
   } catch (error) {
-    console.error('Error fetching repository code:', error.message);
+    console.error('Error fetching repository:', error.message);
     throw new Error(`Failed to analyze repository: ${error.message}`);
   }
 }
@@ -146,48 +165,73 @@ function getLanguageFromExtension(filename) {
   const langMap = {
     'js': 'JavaScript', 'ts': 'TypeScript', 'tsx': 'TypeScript', 'jsx': 'JavaScript',
     'py': 'Python', 'java': 'Java', 'cpp': 'C++', 'c': 'C', 'go': 'Go',
-    'rs': 'Rust', 'php': 'PHP', 'rb': 'Ruby', 'swift': 'Swift', 'kt': 'Kotlin'
+    'rs': 'Rust', 'php': 'PHP', 'rb': 'Ruby', 'swift': 'Swift', 'kt': 'Kotlin',
+    'vue': 'Vue', 'svelte': 'Svelte'
   };
   return langMap[ext] || ext.toUpperCase();
 }
 
-// Analyze code with Gemini
-async function analyzeCodeWithGemini(question, repoData) {
+function buildConversationContext(conversationHistory) {
+  if (!conversationHistory || conversationHistory.length === 0) return '';
+  
+  let context = '\nRecent conversation:\n';
+  conversationHistory.forEach(msg => {
+    if (msg.type === 'user') {
+      context += `Human: ${msg.content}\n`;
+    } else if (msg.type === 'bot') {
+      context += `You: ${msg.content}\n`;
+    }
+  });
+  return context;
+}
+
+// Chat with repository using conversation context
+async function chatWithRepo(question, repoData, conversationHistory = []) {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key not configured');
   }
 
-  // Build a comprehensive code analysis prompt
+  // Build comprehensive context
   let codeContext = `Repository: ${repoData.repoInfo.name}
 ${repoData.repoInfo.description ? `Description: ${repoData.repoInfo.description}` : ''}
 Main Language: ${repoData.repoInfo.language}
+${repoData.repoInfo.topics && repoData.repoInfo.topics.length > 0 ? `Topics: ${repoData.repoInfo.topics.join(', ')}` : ''}
 
-SOURCE CODE:
+CODEBASE ANALYSIS:
 `;
 
-  // Add code files content
-  repoData.codeFiles.forEach((file, index) => {
-    codeContext += `=== ${file.path} ===
+  // Add most important files first
+  repoData.codeFiles.slice(0, 15).forEach((file) => {
+    codeContext += `=== ${file.path} (${file.language}) ===
 ${file.content}
 
 `;
   });
 
-  // Add important config files
+  // Add config files
   repoData.importantFiles.forEach((file) => {
     codeContext += `=== ${file.name} ===
-${file.content.substring(0, 2000)}
+${file.content.substring(0, 3000)}
 
 `;
   });
 
-  const prompt = `You're a senior developer having a casual conversation with a junior dev who just asked about this codebase. Respond naturally and conversationally, like you're sitting next to them explaining the code.
+  // Add conversation context
+  const conversationContext = buildConversationContext(conversationHistory);
 
-${codeContext}
+  const prompt = `You're a senior developer having a casual conversation with a junior developer about this codebase. Be natural, friendly, and conversational - like you're sitting next to them explaining things.
+
+${codeContext}${conversationContext}
 
 Junior dev asks: "${question}"
 
-Respond like you're having a normal conversation - be friendly, casual, and helpful. Don't write a formal analysis or use bullet points. Just talk naturally about the code like you would to a colleague.`;
+Guidelines:
+- Talk naturally like a friendly senior dev
+- Be VERY concise (1-2 short sentences max)
+- Use simple language, avoid jargon
+- Reference specific files only when necessary
+- If you don't know something, just say so briefly
+- Keep it conversational, not formal`;
 
   try {
     const response = await axios.post(
@@ -197,8 +241,10 @@ Respond like you're having a normal conversation - be friendly, casual, and help
           parts: [{ text: prompt }]
         }],
         generationConfig: {
-          temperature: 0.8,
-          maxOutputTokens: 2500 // Increased from 1500 to 2500 for more detailed responses
+          temperature: 0.7,
+          maxOutputTokens: 300, // Much shorter responses
+          topP: 0.8,
+          topK: 40
         }
       },
       {
@@ -209,13 +255,62 @@ Respond like you're having a normal conversation - be friendly, casual, and help
     return response.data.candidates[0].content.parts[0].text;
   } catch (error) {
     console.error('Gemini API error:', error.response?.data || error.message);
-    throw new Error('Failed to analyze code');
+    throw new Error('Failed to chat with repository');
   }
 }
 
+// Repository analysis endpoint
+app.post('/api/analyze', async (req, res) => {
+  try {
+    const { repoUrl } = req.body;
+
+    if (!repoUrl) {
+      return res.status(400).json({ error: 'Repository URL is required' });
+    }
+
+    const repoInfo = extractRepoInfo(repoUrl);
+    if (!repoInfo) {
+      return res.status(400).json({ error: 'Invalid GitHub repository URL' });
+    }
+
+    const cacheKey = `${repoInfo.owner}/${repoInfo.repo}`;
+    
+    // Check cache first
+    if (repoCache.has(cacheKey)) {
+      const cachedData = repoCache.get(cacheKey);
+      console.log(`Using cached analysis for ${cacheKey}`);
+      return res.json({
+        success: true,
+        repoInfo: cachedData.repoInfo,
+        filesAnalyzed: cachedData.totalFiles
+      });
+    }
+
+    console.log(`Analyzing repository: ${cacheKey}`);
+
+    const repoData = await getRepositoryCode(repoInfo.owner, repoInfo.repo);
+    
+    // Cache the analysis
+    repoCache.set(cacheKey, repoData);
+    
+    console.log(`Analysis complete: ${repoData.totalFiles} files processed`);
+
+    res.json({
+      success: true,
+      repoInfo: repoData.repoInfo,
+      filesAnalyzed: repoData.totalFiles
+    });
+
+  } catch (error) {
+    console.error('Analysis error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Chat endpoint
 app.post('/api/chat', async (req, res) => {
   try {
-    const { repoUrl, question } = req.body;
+    const { repoUrl, question, conversationHistory } = req.body;
 
     if (!repoUrl || !question) {
       return res.status(400).json({ error: 'Repository URL and question are required' });
@@ -226,31 +321,35 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'Invalid GitHub repository URL' });
     }
 
-    console.log(`Analyzing CODE in repository: ${repoInfo.owner}/${repoInfo.repo}`);
-
-    // Get actual source code (not just metadata)
-    const repoData = await getRepositoryCode(repoInfo.owner, repoInfo.repo);
+    const cacheKey = `${repoInfo.owner}/${repoInfo.repo}`;
     
-    console.log(`Found ${repoData.codeFiles.length} code files to analyze`);
+    // Get repo data from cache or analyze fresh
+    let repoData = repoCache.get(cacheKey);
+    if (!repoData) {
+      console.log(`Repository not in cache, analyzing: ${cacheKey}`);
+      repoData = await getRepositoryCode(repoInfo.owner, repoInfo.repo);
+      repoCache.set(cacheKey, repoData);
+    }
 
-    // Analyze the actual code
-    const answer = await analyzeCodeWithGemini(question, repoData);
+    const answer = await chatWithRepo(question, repoData, conversationHistory);
 
     res.json({
       success: true,
-      answer,
-      filesAnalyzed: repoData.codeFiles.map(f => f.path),
-      repoInfo: repoData.repoInfo
+      answer
     });
 
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error('Chat error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    cacheSize: repoCache.size
+  });
 });
 
 app.get('*', (req, res) => {
@@ -258,6 +357,7 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log('Now analyzing ACTUAL SOURCE CODE, not just README files!');
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log('📊 Enhanced chat interface with conversation history');
+  console.log('🧠 Using 1M context window for better understanding');
 });
