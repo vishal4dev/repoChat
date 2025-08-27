@@ -48,7 +48,7 @@ function searchInFiles(repoData, query) {
     }
   });
 
-  // Sort results by relevance (more matches first, then by file importance)
+  // Sorting results by relevance (more matches first,then by file importance)
   results.sort((a, b) => {
     const aImportant = isImportantFile(a.file.name);
     const bImportant = isImportantFile(b.file.name);
@@ -60,7 +60,7 @@ function searchInFiles(repoData, query) {
   });
 
   return {
-    results: results.slice(0, 10), // Limit to 10 files
+    results: results.slice(0, 10), // 10 files limit
     totalMatches,
     query: searchQuery
   };
@@ -131,7 +131,7 @@ function searchPatterns(repoData, query) {
     });
   });
 
-  return results.slice(0, 15); // Limit results
+  return results.slice(0, 15); // Limit
 }
 
 module.exports = {

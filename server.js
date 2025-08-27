@@ -3,7 +3,7 @@ const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
 
-// Import services
+// services
 const { extractRepoInfo, getRepositoryCode } = require('./services/githubService');
 const { chatWithRepo } = require('./services/aiService');
 const { searchInFiles, searchPatterns } = require('./services/searchService');
@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'build')));
 
-// In-memory storage for analyzed repositories
+// local memory storage for analyzed repositories
 const repoCache = new Map();
 
 // Repository analysis endpoint
@@ -37,7 +37,7 @@ app.post('/api/analyze', async (req, res) => {
     // Check cache first
     if (repoCache.has(cacheKey)) {
       const cachedData = repoCache.get(cacheKey);
-      console.log(`✅ Using cached analysis for ${cacheKey}`);
+      console.log(`Using cached analysis for ${cacheKey}`);
       return res.json({
         success: true,
         repoInfo: cachedData.repoInfo,
@@ -45,14 +45,14 @@ app.post('/api/analyze', async (req, res) => {
       });
     }
 
-    console.log(`🔍 Analyzing repository: ${cacheKey}`);
+    console.log(`Analyzing repository: ${cacheKey}`);
 
     const repoData = await getRepositoryCode(repoInfo.owner, repoInfo.repo);
     
     // Cache the analysis
     repoCache.set(cacheKey, repoData);
     
-    console.log(`✨ Analysis complete: ${repoData.totalFiles} files processed`);
+    console.log(`Analysis complete: ${repoData.totalFiles} files processed`);
 
     res.json({
       success: true,
@@ -82,10 +82,10 @@ app.post('/api/chat', async (req, res) => {
 
     const cacheKey = `${repoInfo.owner}/${repoInfo.repo}`;
     
-    // Get repo data from cache or analyze fresh
+    // Get repo data from cache 
     let repoData = repoCache.get(cacheKey);
     if (!repoData) {
-      console.log(`🔄 Repository not in cache, analyzing: ${cacheKey}`);
+      console.log(`Repository not in cache, analyzing: ${cacheKey}`);
       repoData = await getRepositoryCode(repoInfo.owner, repoInfo.repo);
       repoCache.set(cacheKey, repoData);
     }
@@ -98,7 +98,7 @@ app.post('/api/chat', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('💬 Chat error:', error.message);
+    console.error('Chat error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -124,7 +124,7 @@ app.post('/api/search', async (req, res) => {
       return res.status(400).json({ error: 'Repository not analyzed yet. Please analyze first.' });
     }
 
-    console.log(`🔍 Searching in ${cacheKey} for: "${query}"`);
+    console.log(`Searching in ${cacheKey} for: "${query}"`);
 
     let searchResults;
     if (type === 'patterns') {
@@ -133,7 +133,7 @@ app.post('/api/search', async (req, res) => {
       searchResults = searchInFiles(repoData, query);
     }
 
-    console.log(`🎯 Found ${searchResults.totalMatches || searchResults.length} matches`);
+    console.log(`Found ${searchResults.totalMatches || searchResults.length} matches`);
 
     res.json({
       success: true,
@@ -204,8 +204,8 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log('📊 Enhanced chat interface with code search');
-  console.log('🧠 Modular architecture with separate services');
-  console.log('🔍 Search functionality: /api/search');
+  console.log(`Server running on port ${PORT}`);
+  console.log('Enhanced chat interface with code search');
+  console.log('Modular architecture with separate services');
+  console.log('Search functionality: /api/search');
 });

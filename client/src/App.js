@@ -78,7 +78,6 @@ export default function GitHubRepoChat() {
       setRepoAnalyzed(true);
       setRepoInfo(data.repoInfo);
       
-      // Add welcome message
       const welcomeMessage = {
         id: Date.now(),
         type: 'bot',
@@ -117,7 +116,7 @@ export default function GitHubRepoChat() {
         body: JSON.stringify({
           repoUrl: repoUrl.trim(),
           question: userMessage.content,
-          conversationHistory: messages.slice(-10) // Send last 10 messages for context
+          conversationHistory: messages.slice(-10)
         }),
       });
 

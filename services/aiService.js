@@ -16,13 +16,11 @@ function buildConversationContext(conversationHistory) {
   return context;
 }
 
-// Chat with repository using conversation context
 async function chatWithRepo(question, repoData, conversationHistory = []) {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key not configured');
   }
 
-  // Build comprehensive context
   let codeContext = `Repository: ${repoData.repoInfo.name}
 ${repoData.repoInfo.description ? `Description: ${repoData.repoInfo.description}` : ''}
 Main Language: ${repoData.repoInfo.language}
@@ -31,7 +29,7 @@ ${repoData.repoInfo.topics && repoData.repoInfo.topics.length > 0 ? `Topics: ${r
 CODEBASE ANALYSIS:
 `;
 
-  // Add most important files first
+  // Adding most important files first
   repoData.codeFiles.slice(0, 15).forEach((file) => {
     codeContext += `=== ${file.path} (${file.language}) ===
 ${file.content}

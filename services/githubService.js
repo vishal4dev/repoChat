@@ -125,7 +125,7 @@ async function getRepositoryCode(owner, repo) {
 
     await processDirectory(rootContents);
 
-    // Sort files by importance
+    // Sorting files by importance
     codeFiles.sort((a, b) => {
       const priority = ['index', 'main', 'app', 'server', 'router'];
       const aPriority = priority.findIndex(p => a.name.toLowerCase().includes(p));
